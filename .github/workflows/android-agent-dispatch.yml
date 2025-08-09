@@ -1,0 +1,41 @@
+name: Android Agent Test (Dispatch)
+
+on:
+  repository_dispatch:
+    types: [ucb-build-complete]
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: 'APK URL (https presigned or s3://bucket/key)'
+        required: true
+        type: string
+      test_file:
+        description: 'Test spec JSON path (relative to repo root)'
+        required: false
+        default: 'test/kokoro_agent_prod_login.json'
+        type: string
+      test_spec_b64:
+        description: 'Base64-encoded test spec JSON (overrides test_file)'
+        required: false
+        default: ''
+        type: string
+      llm_provider:
+        description: 'LLM provider to use (openai, claude)'
+        required: false
+        default: 'openai'
+        type: string
+
+jobs:
+  e2e-test:
+    uses: ./.github/workflows/reusable-agent-test.yml
+    with:
+      apk_url: ${{ github.event.client_payload.apk_url || inputs.apk_url }}
+      test_file: ${{ inputs.test_file || 'test/kokoro_agent_prod_login.json' }}
+      test_spec_b64: ${{ github.event.client_payload.test_spec_b64 || inputs.test_spec_b64 || '' }}
+      llm_provider: ${{ inputs.llm_provider || 'openai' }}
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}

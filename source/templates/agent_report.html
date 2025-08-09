@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Agent Report</title>
+  <link rel="stylesheet" href="report.css"/>
+</head>
+<body>
+  <header>
+    <div class="header-row">
+      <h1 id="title">Agent Report</h1>
+      <span id="resultPill" class="pill">-</span>
+    </div>
+  </header>
+  <main>
+    <section class="summary">
+      <div class="summary-grid">
+        <div class="summary-card">
+          <h3>Goal</h3>
+          <div id="goalBox" class="summary-text"></div>
+        </div>
+        <div class="summary-card">
+          <h3>Suggestions</h3>
+          <div id="suggestionsBox" class="summary-text"></div>
+        </div>
+        <div class="summary-card">
+          <h3>Success criteria</h3>
+          <div id="successBox" class="summary-text"></div>
+        </div>
+        <div class="summary-card">
+          <h3>Steps</h3>
+          <div id="stepsBox" class="summary-text"></div>
+        </div>
+      </div>
+    </section>
+    <div class="grid">
+      <div class="panel">
+        <div class="toolbar" style="margin-bottom:8px">
+          <button id="tabShots" class="badge">Screenshots</button>
+          <button id="tabVideo" class="badge">Video</button>
+        </div>
+        <div id="shotsView">
+          <div class="toolbar" style="margin-bottom:8px; gap:8px; align-items: center; display:flex; flex-wrap:wrap">
+            <label for="stepFilter" class="badge">Step</label>
+            <select id="stepFilter"></select>
+            <span class="badge" id="stepResultPill">-</span>
+          </div>
+          <img id="shot" src="" alt="screenshot"/>
+          <div class="toolbar">
+            <button id="prev" class="badge">Prev</button>
+            <input id="range" class="slider" type="range" min="1" max="1" value="1"/>
+            <button id="next" class="badge">Next</button>
+          </div>
+        </div>
+        <div id="videoView" style="display:none">
+          <video id="sessionVideo" src="" controls style="max-width:100%;max-height:70vh"></video>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="content">
+          <div class="kv">
+            <div class="key">Executed</div><div class="val" id="executed"></div>
+          </div>
+          <hr/>
+          <div class="kv">
+            <div class="key">Index</div><div class="val" id="idx"></div>
+            <div class="key">Command</div><div class="val" id="cmd"></div>
+            <div class="key">Click</div><div class="val coords" id="coords"></div>
+            <div class="key">Physical</div><div class="val" id="phys"></div>
+            <div class="key">Rotation</div><div class="val" id="rot"></div>
+            <div class="key">Canvas</div><div class="val" id="canv"></div>
+          </div>
+          <h3 class="meta-title">Reasoning</h3>
+          <div id="reason" class="reason"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="report_data.js"></script>
+  <script>
+  (function(){
+    const data = (window.REPORT_DATA||{meta:{},events:[]});
+    const events = data.events||[];
+    const substeps = data.substeps||[];
+    const titleEl = document.getElementById('title');
+    const resultPill = document.getElementById('resultPill');
+    const goalBox = document.getElementById('goalBox');
+    const suggBox = document.getElementById('suggestionsBox');
+    const succBox = document.getElementById('successBox');
+    const stepsBox = document.getElementById('stepsBox');
+    const stepResultPill = document.getElementById('stepResultPill');
+    const execEl = document.getElementById('executed');
+
+    titleEl.textContent = data.meta.title || 'Agent Report';
+    goalBox.textContent = data.meta.goal || '';
+    suggBox.textContent = data.meta.suggestions || '';
+    succBox.textContent = data.meta.success_criteria || '';
+    const passed = !!data.meta.ok;
+    resultPill.textContent = passed ? 'PASSED' : 'FAILED';
+    resultPill.classList.add(passed ? 'ok' : 'fail');
+    execEl.textContent = String(data.meta.executed||0);
+
+    const img = document.getElementById('shot');
+    const tabShots = document.getElementById('tabShots');
+    const tabVideo = document.getElementById('tabVideo');
+    const shotsView = document.getElementById('shotsView');
+    const videoView = document.getElementById('videoView');
+    const sessionVideo = document.getElementById('sessionVideo');
+    const range = document.getElementById('range');
+    const prev = document.getElementById('prev');
+    const next = document.getElementById('next');
+    const idxEl = document.getElementById('idx');
+    const cmdEl = document.getElementById('cmd');
+    const coordsEl = document.getElementById('coords');
+    const physEl = document.getElementById('phys');
+    const rotEl = document.getElementById('rot');
+    const canvEl = document.getElementById('canv');
+    const reasonEl = document.getElementById('reason');
+    const stepFilter = document.getElementById('stepFilter');
+
+    // Prepare step filtering
+    let filtered = events.slice();
+    function rebuildFilter(){
+      // collect unique substep ids from events if present, else fall back to ["All"]
+      const ids = Array.from(new Set(events.map(e => e.substep).filter(v => v!==undefined)));
+      const hadSubsteps = ids.length>0 || (substeps && substeps.length>0);
+      // Render small summary of substeps
+      if(hadSubsteps){
+        stepsBox.textContent = (substeps && substeps.length>0)
+          ? substeps.map(s=>`#${s.index}: ${s.ok?"OK":"FAIL"}`).join(' | ')
+          : ids.map(id=>`#${id}`).join(' | ');
+      } else {
+        stepsBox.textContent = '';
+      }
+      // Populate select
+      stepFilter.innerHTML = '';
+      const optAll = document.createElement('option');
+      optAll.value = '';
+      optAll.textContent = 'All steps';
+      stepFilter.appendChild(optAll);
+      const srcIds = (substeps && substeps.length>0) ? substeps.map(s=>s.index) : ids;
+      srcIds.forEach(id => {
+        const o = document.createElement('option');
+        o.value = String(id);
+        o.textContent = `Step ${id}`;
+        stepFilter.appendChild(o);
+      });
+    }
+
+    function applyFilter(){
+      const sel = stepFilter.value;
+      if(!sel){ filtered = events.slice(); }
+      else {
+        const id = parseInt(sel,10);
+        filtered = events.filter(e => e.substep===id);
+      }
+      // Update per-step meta boxes when a specific step is selected
+      if(sel){
+        const id = parseInt(sel,10);
+        const s = (substeps||[]).find(x=>x.index===id) || null;
+        if(s){
+          goalBox.textContent = s.goal || '';
+          suggBox.textContent = s.suggestions || '';
+          succBox.textContent = s.success_criteria || '';
+          const ok = !!s.ok;
+          stepResultPill.textContent = ok ? 'PASSED' : 'FAILED';
+          stepResultPill.classList.remove('ok','fail');
+          stepResultPill.classList.add(ok ? 'ok' : 'fail');
+        }
+      } else {
+        // Reset to overall meta from data.meta
+        goalBox.textContent = data.meta.goal || '';
+        suggBox.textContent = data.meta.suggestions || '';
+        succBox.textContent = data.meta.success_criteria || '';
+        stepResultPill.textContent = '-';
+        stepResultPill.classList.remove('ok','fail');
+      }
+      setMax();
+      if(filtered.length>0){ show(0); }
+      else {
+        img.src = '';
+        idxEl.textContent = '';
+        cmdEl.textContent = '';
+        coordsEl.textContent = '';
+        physEl.textContent = '';
+        rotEl.textContent = '';
+        canvEl.textContent = '';
+        reasonEl.textContent = '';
+        range.value = 1;
+      }
+    }
+
+    function show(i){
+      var e = filtered[i];
+      if(!e) return;
+      img.src = e.image;
+      idxEl.textContent = (e.index!==undefined)? e.index : (i+1);
+      cmdEl.textContent = e.cmd || '';
+      coordsEl.textContent = (e.x!==undefined && e.y!==undefined) ? '(' + e.x + ', ' + e.y + ')' : '-';
+      physEl.textContent = e.physical || '';
+      rotEl.textContent = (e.rotation!==undefined) ? (e.rotation + '°') : '';
+      canvEl.textContent = e.canvas || '';
+      reasonEl.textContent = e.reason || '';
+      range.value = i+1;
+    }
+
+    function setMax(){ range.max = Math.max(1, filtered.length); }
+
+    range.addEventListener('input', function(){ show(Math.max(0, parseInt(range.value)-1)); });
+    prev.addEventListener('click', function(){ var v=Math.max(1, parseInt(range.value)-1); range.value=v; show(v-1); });
+    next.addEventListener('click', function(){ var v=Math.min(filtered.length, parseInt(range.value)+1); range.value=v; show(v-1); });
+
+    rebuildFilter();
+    stepFilter.addEventListener('change', applyFilter);
+    applyFilter();
+    // Setup tabs
+    var hasVideo = !!(data.meta && data.meta.video);
+    if(hasVideo){ sessionVideo.src = data.meta.video; }
+    function switchTab(which){
+      var isVideo = (which==='video');
+      videoView.style.display = isVideo ? '' : 'none';
+      shotsView.style.display = isVideo ? 'none' : '';
+    }
+    tabShots.addEventListener('click', function(){ switchTab('shots'); });
+    tabVideo.addEventListener('click', function(){ switchTab('video'); });
+  })();
+  </script>
+</body>
+</html>
+
+

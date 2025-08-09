@@ -1,0 +1,25 @@
+name: Android Agent Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_file:
+        description: 'Test spec JSON path (relative to repo root)'
+        required: false
+        default: 'test/kokoro_agent_prod_login.json'
+        type: string
+      llm_provider:
+        description: 'LLM provider to use (openai, claude)'
+        required: false
+        default: 'openai'
+        type: string
+
+jobs:
+  e2e-test:
+    uses: ./.github/workflows/reusable-agent-test.yml
+    with:
+      test_file: ${{ inputs.test_file || 'test/kokoro_agent_prod_login.json' }}
+      llm_provider: ${{ inputs.llm_provider || 'openai' }}
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

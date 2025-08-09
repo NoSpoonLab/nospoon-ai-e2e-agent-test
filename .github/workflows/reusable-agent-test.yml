@@ -1,0 +1,286 @@
+name: AI E2E Agent Test (Reusable)
+
+# Reusable workflow: can be called from other repositories.
+# Usage from another repo:
+#
+#   jobs:
+#     e2e:
+#       uses: <owner>/nospoon-ai-e2e-agent-test/.github/workflows/reusable-agent-test.yml@main
+#       with:
+#         apk_url: "https://presigned-url-or-s3://bucket/key"
+#         test_file: "test/app_demo_test.json"
+#         llm_provider: "claude"
+#       secrets:
+#         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+#         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      apk_url:
+        description: 'URL to download the APK (https presigned or s3://bucket/key). Leave empty if APK is already in the repo.'
+        required: false
+        type: string
+        default: ''
+      test_file:
+        description: 'Test spec JSON path relative to agent repo root'
+        required: false
+        type: string
+        default: 'test/kokoro_agent_prod_login.json'
+      test_spec_b64:
+        description: 'Base64-encoded test spec JSON content. When provided, overrides test_file.'
+        required: false
+        type: string
+        default: ''
+      llm_provider:
+        description: 'LLM provider to use (openai, claude)'
+        required: false
+        type: string
+        default: 'openai'
+    outputs:
+      result:
+        description: '"passed" or "failed"'
+        value: ${{ jobs.run-agent.outputs.result }}
+      ok:
+        description: '"true" or "false"'
+        value: ${{ jobs.run-agent.outputs.ok }}
+      summary:
+        description: 'Full JSON summary of the test run'
+        value: ${{ jobs.run-agent.outputs.summary }}
+    secrets:
+      OPENAI_API_KEY:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      AWS_ACCESS_KEY_ID:
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        required: false
+      AWS_REGION:
+        required: false
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      result: ${{ steps.test.outputs.result }}
+      ok: ${{ steps.test.outputs.ok }}
+      summary: ${{ steps.test.outputs.summary }}
+    steps:
+      - name: Checkout agent framework
+        uses: actions/checkout@v4
+        with:
+          repository: NoSpoonLab/nospoon-ai-e2e-agent-test
+          ref: master
+          lfs: true
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Java (JDK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Make scripts executable
+        run: chmod +x scripts/adb_wait_ready.sh
+
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y unzip curl jq
+          pip install awscli
+
+      - name: Set up Android SDK
+        run: |
+          export ANDROID_SDK_ROOT="$HOME/android-sdk"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          curl -fsSL -o /tmp/commandlinetools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/commandlinetools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
+          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_SDK_HOME=$HOME/.android" >> $GITHUB_ENV
+          echo "ANDROID_AVD_HOME=$HOME/.android/avd" >> $GITHUB_ENV
+          mkdir -p "$HOME/.android/avd"
+          echo "PATH=$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Install custom device profile
+        run: |
+          mkdir -p "$HOME/android-sdk/devices"
+          cp ci/hardware-device.xml "$HOME/android-sdk/devices/AI_Device.xml"
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses || true
+          yes | sdkmanager --install "platform-tools" "platforms;android-35" "emulator" "system-images;android-35;google_apis_playstore;x86_64"
+
+      - name: Create and configure AVD
+        run: |
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd -n AI_Device -k "system-images;android-35;google_apis_playstore;x86_64" --device "AI Device" --force || \
+          echo no | avdmanager create avd -n AI_Device -k "system-images;android-35;google_apis_playstore;x86_64" --force
+
+          # Apply CI hardware config
+          AVD_DIR="$ANDROID_AVD_HOME/AI_Device.avd"
+          cp "$AVD_DIR/config.ini" "$AVD_DIR/config.ini.orig"
+          cp ci/hardware-config.ini "$AVD_DIR/config.custom.ini"
+          LINUX_IMG_DIR="$ANDROID_SDK_ROOT/system-images/android-35/google_apis_playstore/x86_64/"
+          while IFS= read -r line; do
+            if echo "$line" | grep -qE '^[A-Za-z0-9_.]+='; then
+              key="$(echo "$line" | cut -d'=' -f1)"
+              val="$(echo "$line" | cut -d'=' -f2-)"
+              if [ "$key" = "AvdId" ] || [ "$key" = "avd.ini.displayname" ]; then continue; fi
+              if [ "$key" = "image.sysdir.1" ]; then val="$LINUX_IMG_DIR"; fi
+              if grep -qE "^${key}=" "$AVD_DIR/config.ini"; then
+                sed -i "s|^${key}=.*|${key}=${val}|" "$AVD_DIR/config.ini"
+              else
+                echo "$key=$val" >> "$AVD_DIR/config.ini"
+              fi
+            fi
+          done < "$AVD_DIR/config.custom.ini"
+
+      - name: Start emulator
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/adbkey" ]; then
+            "$ANDROID_SDK_ROOT/platform-tools/adb" keygen "$HOME/.android/adbkey" || true
+          fi
+          export ADB_VENDOR_KEYS="$HOME/.android/adbkey"
+
+          start_emulator() {
+            ACCEL=""; [ ! -e /dev/kvm ] && ACCEL="-no-accel"
+            "$ANDROID_SDK_ROOT/emulator/emulator" -avd AI_Device -no-window -no-boot-anim -no-snapshot -gpu swiftshader_indirect $ACCEL -camera-back none -camera-front none -skip-adb-auth -logcat '*:W' -verbose >/tmp/emulator.log 2>&1 &
+            echo "Emulator PID: $!"
+          }
+
+          wait_boot() {
+            adb wait-for-device
+            for i in {1..240}; do
+              boot_completed=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+              boot_anim=$(adb shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r')
+              if [ "$boot_completed" = "1" ] || [ "$boot_anim" = "stopped" ]; then return 0; fi
+              sleep 3
+            done
+            return 1
+          }
+
+          ensure_adb_online() {
+            for i in {1..30}; do
+              state=$(adb get-state 2>/dev/null || true)
+              if [ "$state" = "device" ]; then return 0; fi
+              adb kill-server || true; adb start-server || true
+              adb reconnect offline || true; sleep 2
+            done
+            return 1
+          }
+
+          start_emulator
+          if wait_boot && ensure_adb_online; then
+            echo "Emulator is ready."
+          else
+            echo "First attempt failed. Retrying with safer flags..."
+            adb -e emu kill || true; sleep 5
+            ACCEL=""; [ ! -e /dev/kvm ] && ACCEL="-no-accel"
+            "$ANDROID_SDK_ROOT/emulator/emulator" -avd AI_Device -no-window -no-boot-anim -no-snapshot -gpu swiftshader_indirect $ACCEL -camera-back none -camera-front none -no-audio -no-jni -qt-hide-window -skip-adb-auth >/tmp/emulator.log 2>&1 &
+            if ! wait_boot || ! ensure_adb_online; then
+              echo "Emulator failed to boot."; tail -n 400 /tmp/emulator.log || true; exit 1
+            fi
+            echo "Emulator is ready (retry)."
+          fi
+
+      - name: Configure AWS credentials
+        if: ${{ startsWith(inputs.apk_url, 's3://') }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Download APK from URL
+        if: ${{ inputs.apk_url != '' }}
+        run: |
+          mkdir -p apk
+          URL="${{ inputs.apk_url }}"
+          if [[ "$URL" == s3://* ]]; then
+            aws s3 cp "$URL" apk/app-under-test.apk
+          else
+            curl -fSL "$URL" -o apk/app-under-test.apk
+          fi
+          echo "APK downloaded:"; ls -lh apk/app-under-test.apk
+
+      - name: Prepare test spec
+        id: spec
+        run: |
+          SPEC_B64="${{ inputs.test_spec_b64 }}"
+          if [ -n "$SPEC_B64" ]; then
+            echo "$SPEC_B64" | base64 -d > test/_dynamic_spec.json
+            echo "test_file=test/_dynamic_spec.json" >> $GITHUB_OUTPUT
+            echo "Using dynamic test spec (decoded from base64)"
+          else
+            echo "test_file=${{ inputs.test_file }}" >> $GITHUB_OUTPUT
+            echo "Using test file: ${{ inputs.test_file }}"
+          fi
+
+      - name: Run agent test
+        id: test
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_PROVIDER: ${{ inputs.llm_provider }}
+        run: |
+          adb devices | cat
+          ./scripts/adb_wait_ready.sh
+          TEST_FILE="${{ steps.spec.outputs.test_file }}"
+          echo "Running test: $TEST_FILE (provider: $LLM_PROVIDER)"
+          # Pre-install APK if available
+          if [ -f apk/app-under-test.apk ]; then
+            adb -e install -t -r apk/app-under-test.apk || true
+          else
+            APK_PATH=$(python -c "import json; d=json.load(open('$TEST_FILE')); print(d.get('apk',''))" 2>/dev/null || true)
+            if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
+              adb -e install -t -r "$APK_PATH" || true
+            fi
+          fi
+          EXIT_CODE=0
+          python -m source.agent_runner "$TEST_FILE" || EXIT_CODE=$?
+          # Extract result from the latest summary JSON
+          SUMMARY_FILE=$(find reports -name "summary.json" -type f 2>/dev/null | sort | tail -1)
+          if [ -n "$SUMMARY_FILE" ]; then
+            OK=$(python -c "import json; d=json.load(open('$SUMMARY_FILE')); print(str(d.get('ok',False)).lower())")
+            RESULT=$(python -c "import json; d=json.load(open('$SUMMARY_FILE')); print(d.get('result','unknown'))")
+            SUMMARY=$(cat "$SUMMARY_FILE")
+            echo "ok=$OK" >> $GITHUB_OUTPUT
+            echo "result=$RESULT" >> $GITHUB_OUTPUT
+            echo "summary<<EOF" >> $GITHUB_OUTPUT
+            echo "$SUMMARY" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "ok=false" >> $GITHUB_OUTPUT
+            echo "result=error" >> $GITHUB_OUTPUT
+            echo "summary={}" >> $GITHUB_OUTPUT
+          fi
+          exit $EXIT_CODE
+
+      - name: Upload reports artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-reports
+          path: reports/
+          if-no-files-found: warn
