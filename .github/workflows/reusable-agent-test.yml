@@ -37,6 +37,11 @@ on:
         required: false
         type: string
         default: 'openai'
+      max_steps:
+        description: 'Max agent turns per substep (default: 250)'
+        required: false
+        type: number
+        default: 250
     outputs:
       result:
         description: '"passed" or "failed"'
@@ -258,7 +263,7 @@ jobs:
             fi
           fi
           EXIT_CODE=0
-          python -m source.agent_runner "$TEST_FILE" || EXIT_CODE=$?
+          python -m source.agent_runner "$TEST_FILE" --max-steps ${{ inputs.max_steps }} || EXIT_CODE=$?
           # Extract result from the latest summary JSON
           SUMMARY_FILE=$(find reports -name "summary.json" -type f 2>/dev/null | sort | tail -1)
           if [ -n "$SUMMARY_FILE" ]; then

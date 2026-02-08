@@ -55,7 +55,8 @@ from .app_lifecycle import parse_install_config, prepare_app, teardown_app
 from .reporting import VideoRecorder, write_summary_json, write_agent_log, write_web_report
 from .llm import create_provider, LLMOutputType
 
-MAX_AGENT_STEPS = int(os.environ.get("OPENAI_AGENT_MAX_STEPS", "250"))
+DEFAULT_MAX_STEPS = 250
+MAX_AGENT_STEPS = int(os.environ.get("AGENT_MAX_STEPS", os.environ.get("OPENAI_AGENT_MAX_STEPS", str(DEFAULT_MAX_STEPS))))
 WAIT_BETWEEN_ACTIONS = float(os.environ.get("OPENAI_AGENT_WAIT_BETWEEN_ACTIONS", "1.5"))
 
 
@@ -265,6 +266,23 @@ def run_agent(test_json_path: Path) -> int:
     video_path = report_root / "session.mp4"
     remote_video_path = f"/sdcard/agent_session_{ts}.mp4"
     recorder = VideoRecorder(device, remote_video_path, video_path)
+
+    # Start device logcat capture
+    device_log_path = report_root / "device_log.txt"
+    logcat_proc = None
+    logcat_file = None
+    try:
+        adb_cmd = [str(device.tools.adb)]
+        if getattr(device, "serial", None):
+            adb_cmd += ["-s", device.serial]
+        adb_cmd += ["logcat", "-v", "threadtime"]
+        logcat_file = open(device_log_path, "w", encoding="utf-8", errors="replace")
+        logcat_proc = subprocess.Popen(adb_cmd, stdout=logcat_file, stderr=subprocess.STDOUT, env=device.env)
+    except Exception:
+        logcat_proc = None
+        if logcat_file is not None:
+            logcat_file.close()
+            logcat_file = None
 
     provider = create_provider(os.environ.get("LLM_PROVIDER", "openai"))
     # Summary and accumulators
@@ -499,6 +517,21 @@ def run_agent(test_json_path: Path) -> int:
         summary["ok"] = False
         log(f"[Agent] EXCEPTION: {exc}\n{tb}")
     finally:
+        # Stop device logcat capture
+        if logcat_proc is not None:
+            try:
+                logcat_proc.terminate()
+                logcat_proc.wait(timeout=5)
+            except Exception:
+                try:
+                    logcat_proc.kill()
+                except Exception:
+                    pass
+        if logcat_file is not None:
+            try:
+                logcat_file.close()
+            except Exception:
+                pass
         teardown_app(device, package, install_config.uninstall_after)
         recorder.stop_and_pull()
 
@@ -517,11 +550,18 @@ def run_agent(test_json_path: Path) -> int:
 
 def main() -> int:
     import sys
+    import argparse
 
-    if len(sys.argv) < 2:
-        print("Usage: python -m source.agent_runner <agent_test.json>")
-        return 2
-    return run_agent(Path(sys.argv[1]).resolve())
+    parser = argparse.ArgumentParser(description="AI E2E Agent Runner")
+    parser.add_argument("test_json", help="Path to the test spec JSON file")
+    parser.add_argument("--max-steps", type=int, default=None, help=f"Max agent turns per substep (default: {DEFAULT_MAX_STEPS})")
+    args = parser.parse_args()
+
+    if args.max_steps is not None:
+        global MAX_AGENT_STEPS
+        MAX_AGENT_STEPS = args.max_steps
+
+    return run_agent(Path(args.test_json).resolve())
 
 
 if __name__ == "__main__":
