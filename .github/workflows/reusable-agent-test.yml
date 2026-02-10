@@ -133,19 +133,19 @@ jobs:
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses || true
-          yes | sdkmanager --install "platform-tools" "platforms;android-35" "emulator" "system-images;android-35;google_apis_playstore;x86_64"
+          yes | sdkmanager --install "platform-tools" "platforms;android-34" "emulator" "system-images;android-34;google_apis_playstore;x86_64"
 
       - name: Create and configure AVD
         run: |
           mkdir -p "$ANDROID_AVD_HOME"
-          echo no | avdmanager create avd -n AI_Device -k "system-images;android-35;google_apis_playstore;x86_64" --device "AI Device" --force || \
-          echo no | avdmanager create avd -n AI_Device -k "system-images;android-35;google_apis_playstore;x86_64" --force
+          echo no | avdmanager create avd -n AI_Device -k "system-images;android-34;google_apis_playstore;x86_64" --device "AI Device" --force || \
+          echo no | avdmanager create avd -n AI_Device -k "system-images;android-34;google_apis_playstore;x86_64" --force
 
           # Apply CI hardware config
           AVD_DIR="$ANDROID_AVD_HOME/AI_Device.avd"
           cp "$AVD_DIR/config.ini" "$AVD_DIR/config.ini.orig"
           cp ci/hardware-config.ini "$AVD_DIR/config.custom.ini"
-          LINUX_IMG_DIR="$ANDROID_SDK_ROOT/system-images/android-35/google_apis_playstore/x86_64/"
+          LINUX_IMG_DIR="$ANDROID_SDK_ROOT/system-images/android-34/google_apis_playstore/x86_64/"
           while IFS= read -r line; do
             if echo "$line" | grep -qE '^[A-Za-z0-9_.]+='; then
               key="$(echo "$line" | cut -d'=' -f1)"
