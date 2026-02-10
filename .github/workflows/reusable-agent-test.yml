@@ -42,6 +42,21 @@ on:
         required: false
         type: number
         default: 250
+      report_s3_bucket:
+        description: 'S3 bucket to upload the latest report (optional)'
+        required: false
+        type: string
+        default: ''
+      report_s3_region:
+        description: 'S3 bucket region for report upload (optional)'
+        required: false
+        type: string
+        default: ''
+      report_s3_path:
+        description: 'S3 key prefix for report upload (optional)'
+        required: false
+        type: string
+        default: ''
     outputs:
       result:
         description: '"passed" or "failed"'
@@ -281,6 +296,41 @@ jobs:
             echo "summary={}" >> $GITHUB_OUTPUT
           fi
           exit $EXIT_CODE
+
+      - name: Resolve report directory
+        if: always()
+        id: report_dir
+        run: |
+          REPORT_SUMMARY=$(find reports -name "summary.json" -type f 2>/dev/null | sort | tail -1)
+          if [ -z "$REPORT_SUMMARY" ]; then
+            echo "dir=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          REPORT_DIR=$(dirname "$REPORT_SUMMARY")
+          echo "dir=$REPORT_DIR" >> $GITHUB_OUTPUT
+
+      - name: Build S3 destination
+        if: ${{ always() && inputs.report_s3_bucket != '' && inputs.report_s3_region != '' && steps.report_dir.outputs.dir != '' }}
+        id: s3_dest
+        env:
+          REPORT_S3_BUCKET: ${{ inputs.report_s3_bucket }}
+          REPORT_S3_PATH: ${{ inputs.report_s3_path }}
+        run: |
+          dest="$REPORT_S3_BUCKET"
+          if [ -n "$REPORT_S3_PATH" ]; then
+            dest="$dest/$REPORT_S3_PATH"
+          fi
+          echo "bucket=$dest" >> $GITHUB_OUTPUT
+
+      - name: Upload report to S3
+        if: ${{ always() && inputs.report_s3_bucket != '' && inputs.report_s3_region != '' && steps.report_dir.outputs.dir != '' }}
+        uses: reggionick/s3-deploy@v4
+        with:
+          folder: ${{ steps.report_dir.outputs.dir }}
+          bucket: ${{ steps.s3_dest.outputs.bucket }}
+          bucket-region: ${{ inputs.report_s3_region }}
+          delete-removed: false
+          private: true
 
       - name: Upload reports artifact
         if: always()

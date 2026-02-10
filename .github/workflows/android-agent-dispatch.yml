@@ -25,6 +25,11 @@ on:
         default: 'openai'
         type: string
 
+env:
+  REPORT_S3_BUCKET: ''
+  REPORT_S3_REGION: ''
+  REPORT_S3_PATH: ''
+
 jobs:
   e2e-test:
     uses: ./.github/workflows/reusable-agent-test.yml
@@ -33,6 +38,9 @@ jobs:
       test_file: ${{ inputs.test_file || 'test/kokoro_agent_prod_login.json' }}
       test_spec_b64: ${{ github.event.client_payload.test_spec_b64 || inputs.test_spec_b64 || '' }}
       llm_provider: ${{ inputs.llm_provider || 'openai' }}
+      report_s3_bucket: ${{ env.REPORT_S3_BUCKET }}
+      report_s3_region: ${{ env.REPORT_S3_REGION }}
+      report_s3_path: ${{ env.REPORT_S3_PATH }}
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
