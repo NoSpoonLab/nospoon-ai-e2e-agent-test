@@ -57,6 +57,26 @@ on:
         required: false
         type: string
         default: ''
+      app_version:
+        description: 'App version to report in notifications (optional)'
+        required: false
+        type: string
+        default: ''
+      slack_webhook_url:
+        description: 'Slack incoming webhook URL (optional)'
+        required: false
+        type: string
+        default: ''
+      slack_channel:
+        description: 'Slack channel to post to (optional)'
+        required: false
+        type: string
+        default: ''
+      slack_message:
+        description: 'Optional message to prepend in Slack notification'
+        required: false
+        type: string
+        default: ''
     outputs:
       result:
         description: '"passed" or "failed"'
@@ -148,7 +168,7 @@ jobs:
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses || true
-          yes | sdkmanager --install "platform-tools" "platforms;android-34" "emulator" "system-images;android-34;google_apis_playstore;x86_64"
+          yes | sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "emulator" "system-images;android-34;google_apis_playstore;x86_64"
 
       - name: Create and configure AVD
         run: |
@@ -309,16 +329,41 @@ jobs:
           REPORT_DIR=$(dirname "$REPORT_SUMMARY")
           echo "dir=$REPORT_DIR" >> $GITHUB_OUTPUT
 
+      - name: Resolve report URL
+        if: always()
+        id: report_url
+        env:
+          REPORT_S3_BUCKET: ${{ inputs.report_s3_bucket }}
+          REPORT_S3_REGION: ${{ inputs.report_s3_region }}
+          REPORT_S3_PATH: ${{ inputs.report_s3_path }}
+          REPORT_DIR: ${{ steps.report_dir.outputs.dir }}
+        run: |
+          if [ -n "$REPORT_S3_BUCKET" ] && [ -n "$REPORT_S3_REGION" ] && [ -n "$REPORT_DIR" ]; then
+            base="https://${REPORT_S3_BUCKET}.s3.${REPORT_S3_REGION}.amazonaws.com"
+            if [ -n "$REPORT_S3_PATH" ]; then
+              echo "url=${base}/${REPORT_S3_PATH}/report.html" >> $GITHUB_OUTPUT
+            else
+              base_dir=$(basename "$REPORT_DIR")
+              echo "url=${base}/reports/${base_dir}/report.html" >> $GITHUB_OUTPUT
+            fi
+            exit 0
+          fi
+          echo "url=" >> $GITHUB_OUTPUT
+
       - name: Build S3 destination
         if: ${{ always() && inputs.report_s3_bucket != '' && inputs.report_s3_region != '' && steps.report_dir.outputs.dir != '' }}
         id: s3_dest
         env:
           REPORT_S3_BUCKET: ${{ inputs.report_s3_bucket }}
           REPORT_S3_PATH: ${{ inputs.report_s3_path }}
+          REPORT_DIR: ${{ steps.report_dir.outputs.dir }}
         run: |
           dest="$REPORT_S3_BUCKET"
           if [ -n "$REPORT_S3_PATH" ]; then
             dest="$dest/$REPORT_S3_PATH"
+          else
+            base_dir=$(basename "$REPORT_DIR")
+            dest="$dest/reports/$base_dir"
           fi
           echo "bucket=$dest" >> $GITHUB_OUTPUT
 
@@ -339,3 +384,48 @@ jobs:
           name: agent-reports
           path: reports/
           if-no-files-found: warn
+
+      - name: Resolve app version
+        if: always()
+        id: app_version
+        env:
+          INPUT_VERSION: ${{ inputs.app_version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "version=$INPUT_VERSION" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          APK_PATH="apk/app-under-test.apk"
+          AAPT="$ANDROID_SDK_ROOT/build-tools/34.0.0/aapt"
+          if [ -f "$APK_PATH" ] && [ -x "$AAPT" ]; then
+            VERSION=$("$AAPT" dump badging "$APK_PATH" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -n 1)
+            if [ -n "$VERSION" ]; then
+              echo "version=$VERSION" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          echo "version=unknown" >> $GITHUB_OUTPUT
+
+      - name: Notify Slack
+        if: ${{ always() && inputs.slack_webhook_url != '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}
+          SLACK_CHANNEL: ${{ inputs.slack_channel }}
+          SLACK_MESSAGE: ${{ inputs.slack_message }}
+          RESULT: ${{ steps.test.outputs.result }}
+          OK: ${{ steps.test.outputs.ok }}
+          REPORT_URL: ${{ steps.report_url.outputs.url }}
+          APP_VERSION: ${{ steps.app_version.outputs.version }}
+        run: |
+          status="failed"
+          [ "$OK" = "true" ] && status="passed"
+          report_text="(no report URL)"
+          if [ -n "$REPORT_URL" ]; then report_text="$REPORT_URL"; fi
+          base_text="E2E result: ${status} | app version: ${APP_VERSION} | report: ${report_text}"
+          if [ -n "$SLACK_MESSAGE" ]; then
+            text="${SLACK_MESSAGE}\n${base_text}"
+          else
+            text="$base_text"
+          fi
+          payload=$(jq -n --arg text "$text" --arg channel "$SLACK_CHANNEL" 'if $channel=="" then {text:$text} else {text:$text, channel:$channel} end')
+          curl -X POST -H "Content-type: application/json" --data "$payload" "$SLACK_WEBHOOK_URL"

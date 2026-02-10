@@ -29,6 +29,10 @@ env:
   REPORT_S3_BUCKET: ''
   REPORT_S3_REGION: ''
   REPORT_S3_PATH: ''
+  APP_VERSION: ''
+  SLACK_WEBHOOK_URL: ''
+  SLACK_CHANNEL: ''
+  SLACK_MESSAGE: ''
 
 jobs:
   e2e-test:
@@ -41,6 +45,10 @@ jobs:
       report_s3_bucket: ${{ env.REPORT_S3_BUCKET }}
       report_s3_region: ${{ env.REPORT_S3_REGION }}
       report_s3_path: ${{ env.REPORT_S3_PATH }}
+      app_version: ${{ env.APP_VERSION }}
+      slack_webhook_url: ${{ env.SLACK_WEBHOOK_URL }}
+      slack_channel: ${{ env.SLACK_CHANNEL }}
+      slack_message: ${{ env.SLACK_MESSAGE }}
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
