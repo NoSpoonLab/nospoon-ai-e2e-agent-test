@@ -420,7 +420,9 @@ jobs:
           APP_VERSION: ${{ steps.app_version.outputs.version }}
         run: |
           status="failed"
-          [ "$OK" = "true" ] && status="passed"
+          if [ "$RESULT" = "passed" ] || [ "$OK" = "true" ]; then
+            status="passed"
+          fi
           report_text="(no report URL)"
           if [ -n "$REPORT_URL" ]; then report_text="$REPORT_URL"; fi
           base_text="E2E result: ${status} | app version: ${APP_VERSION} | report: ${report_text}"
@@ -429,14 +431,6 @@ jobs:
           else
             text="$base_text"
           fi
-          json_payload=$(printf "%s" "$text" | python - <<'PY'
-          import json
-          import sys
-
-          text = sys.stdin.read()
-          data = {"text": text}
-          print(json.dumps(data))
-          PY
-          )
+          json_payload=$(printf "%s" "$text" | python -c "import json,sys; print(json.dumps({'text': sys.stdin.read()}))")
           payload="payload=$json_payload"
           curl -X POST --data-urlencode "$payload" "$SLACK_WEBHOOK_URL"
