@@ -1,0 +1,66 @@
+name: E2E Agent Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: 'apk url'
+        required: true
+        type: string
+      app_version:
+        description: 'app version'
+        required: true
+        type: string
+      slack_message:
+        description: 'message description'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      test_spec_b64: ${{ steps.encode.outputs.spec }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Encode test spec
+        id: encode
+        run: echo "spec=$(base64 -w0 < Tools/E2EAgent/test_to_validate.json)" >> $GITHUB_OUTPUT
+
+  e2e:
+    needs: prepare
+    uses: NoSpoonLab/nospoon-ai-e2e-agent-test/.github/workflows/reusable-agent-test.yml@master
+    with:
+      apk_url: ${{ inputs.apk_url }}
+      test_spec_b64: ${{ needs.prepare.outputs.test_spec_b64 }}
+      llm_provider:  "openai"
+      max_steps: 75
+      report_s3_bucket: 's3 bucket'
+      report_s3_region: 's3 bucket region'
+      report_s3_path: ''
+      app_version: ${{ inputs.app_version }}
+      slack_webhook_url: 'slack hook for the message'
+      slack_message: ${{ inputs.slack_message }}
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+
+  results:
+    needs: e2e
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Test result
+        run: |
+          echo "Result: ${{ needs.e2e.outputs.result }}"
+          echo "OK: ${{ needs.e2e.outputs.ok }}"
+          echo "Summary: ${{ needs.e2e.outputs.summary }}"
+          if [ "${{ needs.e2e.outputs.ok }}" != "true" ]; then
+            echo "E2E test failed!"
+            exit 1
+          fi
+          echo "E2E test passed!"
