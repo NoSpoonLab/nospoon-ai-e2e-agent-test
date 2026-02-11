@@ -367,6 +367,14 @@ jobs:
           fi
           echo "bucket=$dest" >> $GITHUB_OUTPUT
 
+      - name: Configure AWS credentials (report upload)
+        if: ${{ inputs.report_s3_bucket != '' && inputs.report_s3_region != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.report_s3_region }}
+
       - name: Upload report to S3
         if: ${{ always() && inputs.report_s3_bucket != '' && inputs.report_s3_region != '' && steps.report_dir.outputs.dir != '' }}
         uses: reggionick/s3-deploy@v4
