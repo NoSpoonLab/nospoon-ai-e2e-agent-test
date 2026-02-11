@@ -67,11 +67,6 @@ on:
         required: false
         type: string
         default: ''
-      slack_channel:
-        description: 'Slack channel to post to (optional)'
-        required: false
-        type: string
-        default: ''
       slack_message:
         description: 'Optional message to prepend in Slack notification'
         required: false
@@ -418,7 +413,6 @@ jobs:
         if: ${{ always() && inputs.slack_webhook_url != '' }}
         env:
           SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}
-          SLACK_CHANNEL: ${{ inputs.slack_channel }}
           SLACK_MESSAGE: ${{ inputs.slack_message }}
           RESULT: ${{ steps.test.outputs.result }}
           OK: ${{ steps.test.outputs.ok }}
@@ -435,5 +429,14 @@ jobs:
           else
             text="$base_text"
           fi
-          payload=$(jq -n --arg text "$text" --arg channel "$SLACK_CHANNEL" 'if $channel=="" then {text:$text} else {text:$text, channel:$channel} end')
-          curl -X POST -H "Content-type: application/json" --data "$payload" "$SLACK_WEBHOOK_URL"
+          json_payload=$(printf "%s" "$text" | python - <<'PY'
+import json
+import sys
+
+text = sys.stdin.read()
+data = {"text": text}
+print(json.dumps(data))
+PY
+          )
+          payload="payload=$json_payload"
+          curl -X POST --data-urlencode "$payload" "$SLACK_WEBHOOK_URL"

@@ -31,7 +31,6 @@ env:
   REPORT_S3_PATH: ''
   APP_VERSION: ''
   SLACK_WEBHOOK_URL: ''
-  SLACK_CHANNEL: ''
   SLACK_MESSAGE: ''
 
 jobs:
@@ -47,7 +46,6 @@ jobs:
       report_s3_path: ${{ env.REPORT_S3_PATH }}
       app_version: ${{ env.APP_VERSION }}
       slack_webhook_url: ${{ env.SLACK_WEBHOOK_URL }}
-      slack_channel: ${{ env.SLACK_CHANNEL }}
       slack_message: ${{ env.SLACK_MESSAGE }}
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
