@@ -60,7 +60,7 @@ Anti-loop: same action repeated 10 times → automatic BACK key injection.
 
 ### Test Specifications (`test/`)
 
-JSON files with: `apk`, `package`, `activity`, `goal`, `suggestions`, `success_criteria`, and optional `steps` (multi-step flows) and `pre_steps` (manual setup before AI). Supports `{timestamp}` placeholder for unique values.
+JSON files with: `apk`, `package`, `activity`, `goal`, `suggestions`, `negative_prompt`, `success_criteria`, and optional `steps` (multi-step flows) and `pre_steps` (manual setup before AI). Supports `{timestamp}` placeholder for unique values.
 
 ### CI/CD Pipeline
 

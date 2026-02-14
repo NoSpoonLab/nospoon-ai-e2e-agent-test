@@ -126,6 +126,7 @@ def write_web_report(
         first_step = steps_spec[0] if steps_spec else {}
         report_goal = (f"Multi-step test: {len(steps_spec)} steps" if is_multi else str(first_step.get("goal", "")))
         report_suggestions = ("" if is_multi else str(first_step.get("suggestions", "")))
+        report_negative_prompt = ("" if is_multi else str(first_step.get("negative_prompt", "")))
         report_success = ("" if is_multi else str(first_step.get("success_criteria", "")))
 
         has_video = video_path is not None and video_path.exists() and video_path.stat().st_size > 0
@@ -137,6 +138,7 @@ def write_web_report(
                 "executed": summary.get("executed", 0),
                 "package": package,
                 "suggestions": report_suggestions,
+                "negative_prompt": report_negative_prompt,
                 "success_criteria": report_success,
                 "result": summary.get("result", "failed"),
                 "ok": bool(summary.get("ok", False)),

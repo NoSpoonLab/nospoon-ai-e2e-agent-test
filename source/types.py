@@ -11,6 +11,7 @@ class StepSpec:
     """A single substep within a test (goal + optional guidance)."""
     goal: str = ""
     suggestions: str = ""
+    negative_prompt: str = ""
     success_criteria: str = ""
 
 
@@ -61,6 +62,7 @@ class SubstepResult:
     ok: bool = False
     turns: int = 0
     suggestions: str = ""
+    negative_prompt: str = ""
     success_criteria: str = ""
 
 

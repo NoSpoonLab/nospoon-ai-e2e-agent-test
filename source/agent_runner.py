@@ -64,8 +64,9 @@ SYSTEM_PROMPT = (
     "You control an Android emulator screen. Use the computer tool to progress. "
     "Actions map to Android input: click => tap(x,y), drag/scroll => swipe, type => input text, "
     "key => hardware key codes (HOME=3, BACK=4, ENTER=66). After each action you will receive a fresh screenshot. "
-    "You will receive context that includes 'Goal', optional 'Hints', optional 'Suggestions', and optional 'Success criteria'. "
-    "Treat 'Suggestions' as strict guidance when deciding actions."
+    "You will receive context that includes 'Goal', optional 'Hints', optional 'Suggestions', "
+    "optional 'Negative prompt', and optional 'Success criteria'. Treat 'Suggestions' as strict guidance. "
+    "Treat 'Negative prompt' as hard constraints and never perform forbidden actions."
 )
 
 
@@ -190,7 +191,7 @@ def run_agent(test_json_path: Path) -> int:
     activity = spec.get("activity")
     # Optional pre-steps before agent loop
     pre_steps = list(spec.get("pre_steps", []))
-    # Support multi-step agent tests: an array `steps` with per-step goal/suggestions/success_criteria
+    # Support multi-step agent tests: an array `steps` with per-step guidance fields.
     steps_array = spec.get("steps")
     if isinstance(steps_array, list) and steps_array and isinstance(steps_array[0], dict) and ("goal" in steps_array[0]):
         steps_spec: List[Dict[str, Any]] = steps_array  # type: ignore[assignment]
@@ -198,14 +199,16 @@ def run_agent(test_json_path: Path) -> int:
         steps_spec = [{
             "goal": str(spec.get("goal", "")).strip(),
             "suggestions": str(spec.get("suggestions", "") or "").strip(),
+            "negative_prompt": str(spec.get("negative_prompt", "") or "").strip(),
             "success_criteria": str(spec.get("success_criteria", "") or "").strip(),
         }]
     # Initialize current step texts from the first step (backwards compatible if single)
     goal = str(steps_spec[0].get("goal", "")).strip()
     suggestions_text: str = str(steps_spec[0].get("suggestions", "") or "").strip()
+    negative_prompt_text: str = str(steps_spec[0].get("negative_prompt", "") or "").strip()
     success_criteria_text: str = str(steps_spec[0].get("success_criteria", "") or "").strip()
 
-    # Replace placeholders like {timestamp} with Unix timestamp in goal/suggestions/success_criteria
+    # Replace placeholders like {timestamp} in user-provided textual guidance fields.
     try:
         now_ts = str(int(time.time()))
         def _apply_placeholders(text: str) -> str:
@@ -213,6 +216,8 @@ def run_agent(test_json_path: Path) -> int:
         goal = _apply_placeholders(goal)
         if suggestions_text:
             suggestions_text = _apply_placeholders(suggestions_text)
+        if negative_prompt_text:
+            negative_prompt_text = _apply_placeholders(negative_prompt_text)
         if success_criteria_text:
             success_criteria_text = _apply_placeholders(success_criteria_text)
     except Exception:
@@ -292,6 +297,7 @@ def run_agent(test_json_path: Path) -> int:
         "executed": 0,
         "report_dir": str(report_root),
         "goal": goal,
+        "negative_prompt": negative_prompt_text,
         "package": package,
     }
     # Progressive logs buffer
@@ -319,11 +325,13 @@ def run_agent(test_json_path: Path) -> int:
             now_ts = str(int(time.time()))
             goal_text = str(sub.get("goal", "") or "").replace("{timestamp}", now_ts).strip()
             suggestions_text = str(sub.get("suggestions", "") or "").replace("{timestamp}", now_ts).strip()
+            negative_prompt_text = str(sub.get("negative_prompt", "") or "").replace("{timestamp}", now_ts).strip()
             success_criteria_text = str(sub.get("success_criteria", "") or "").replace("{timestamp}", now_ts).strip()
 
             # Update summary first-step goal for compatibility
             if sub_idx == 1:
                 summary["goal"] = goal_text
+                summary["negative_prompt"] = negative_prompt_text
 
             # Build persistent context for this sub-step and initial screenshot
             initial_screenshot = take_screenshot_b64(device, scr_dir)
@@ -339,6 +347,8 @@ def run_agent(test_json_path: Path) -> int:
                 base_user_context += "\nHints: " + " | ".join(str(h) for h in hints)
             if suggestions_text:
                 base_user_context += "\nSuggestions: " + suggestions_text
+            if negative_prompt_text:
+                base_user_context += "\nNegative prompt (DO NOT do): " + negative_prompt_text
             if success_criteria_text:
                 base_user_context += "\nSuccess criteria: " + success_criteria_text
             base_user_context += "\nInstruction: Only when the Success criteria are satisfied, call the function tool end_test with {success: true}. Otherwise continue working and do not call end_test."
@@ -500,6 +510,7 @@ def run_agent(test_json_path: Path) -> int:
                 "index": sub_idx,
                 "goal": goal_text,
                 "suggestions": suggestions_text,
+                "negative_prompt": negative_prompt_text,
                 "success_criteria": success_criteria_text,
                 "ok": sub_ok,
                 "turns": turns_this_sub,

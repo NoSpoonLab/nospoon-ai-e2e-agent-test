@@ -8,7 +8,8 @@
   ],
   "goal": "Reach the game area screen",
   "suggestions": "If asked what type of user you are, always choose 'parent'. If asked whether your child has any special needs, answer 'Yes'. If asked for an email during registration, use kokorokids_test_{timestamp}@kokorokids.app. If you encounter a completely black screen, tap on the screen to make a button appear, do not click in the gameicons",
-  "success_criteria": "Reach the Game Area screen: a cartoon-style children’s background with a light blue sky and large rounded white clouds, smooth green hills in various shades, trees with bright green circular canopies and thin brown trunks, vivid green meadow with rounded bushes, small simple flowers in pink, purple, and white, a yellow wooden bench with brown legs in the lower right corner, and a carousel of colorful rectangular game cards placed in the central lower section. When this screen is visible, consider the test completed."
+  "negative_prompt": "Never press the button labeled 'I Already have an account'. If you see the sign-in screen and 'Sign in with your account', with buttons 'Sign in with Google', 'Sign in with Apple', and 'Login with email', immediately press BACK to return to the previous screen. Do not open external links or app-store pages. Do not go back to the emulator home screen.",
+  "success_criteria": "Reach the Game Area screen: a cartoon-style children’s background with a light blue sky and large rounded white clouds, smooth green hills in various shades, trees with bright green circular canopies and thin brown trunks, vivid green meadow with rounded bushes  and a carousel of colorful rectangular game cards placed in the central lower section. When this screen is visible, consider the test completed."
 }
 
 

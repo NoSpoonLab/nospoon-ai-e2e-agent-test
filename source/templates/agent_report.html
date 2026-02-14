@@ -25,6 +25,10 @@
           <div id="suggestionsBox" class="summary-text"></div>
         </div>
         <div class="summary-card">
+          <h3>Negative prompt</h3>
+          <div id="negativePromptBox" class="summary-text"></div>
+        </div>
+        <div class="summary-card">
           <h3>Success criteria</h3>
           <div id="successBox" class="summary-text"></div>
         </div>
@@ -87,6 +91,7 @@
     const resultPill = document.getElementById('resultPill');
     const goalBox = document.getElementById('goalBox');
     const suggBox = document.getElementById('suggestionsBox');
+    const negBox = document.getElementById('negativePromptBox');
     const succBox = document.getElementById('successBox');
     const stepsBox = document.getElementById('stepsBox');
     const stepResultPill = document.getElementById('stepResultPill');
@@ -95,6 +100,7 @@
     titleEl.textContent = data.meta.title || 'Agent Report';
     goalBox.textContent = data.meta.goal || '';
     suggBox.textContent = data.meta.suggestions || '';
+    negBox.textContent = data.meta.negative_prompt || '';
     succBox.textContent = data.meta.success_criteria || '';
     const passed = !!data.meta.ok;
     resultPill.textContent = passed ? 'PASSED' : 'FAILED';
@@ -162,6 +168,7 @@
         if(s){
           goalBox.textContent = s.goal || '';
           suggBox.textContent = s.suggestions || '';
+          negBox.textContent = s.negative_prompt || '';
           succBox.textContent = s.success_criteria || '';
           const ok = !!s.ok;
           stepResultPill.textContent = ok ? 'PASSED' : 'FAILED';
@@ -172,6 +179,7 @@
         // Reset to overall meta from data.meta
         goalBox.textContent = data.meta.goal || '';
         suggBox.textContent = data.meta.suggestions || '';
+        negBox.textContent = data.meta.negative_prompt || '';
         succBox.textContent = data.meta.success_criteria || '';
         stepResultPill.textContent = '-';
         stepResultPill.classList.remove('ok','fail');
