@@ -7,7 +7,7 @@ Steps to run the AI agent tests locally on Windows.
 - **Python 3.11+**
 - **Unity Hub** with an Android module installed (provides SDK, JDK, ADB)
 - **Android Studio** (only needed once to install the emulator and system images)
-- **OpenAI API Key** with access to the `computer-use-preview` model, OR
+- **OpenAI API Key** with access to `gpt-5.4` and the Responses API computer tool, OR
 - **Anthropic API Key** with access to Claude Computer Use models
 
 ## 1. Install Android Emulator via Android Studio
@@ -66,7 +66,7 @@ $env:ANDROID_SDK_ROOT = "C:\Program Files\Unity\Hub\Editor\<version>\Editor\Data
 $env:ANDROID_HOME = $env:ANDROID_SDK_ROOT
 $env:JAVA_HOME = "C:\Program Files\Unity\Hub\Editor\<version>\Editor\Data\PlaybackEngines\AndroidPlayer\OpenJDK"
 
-# OpenAI provider (default)
+# OpenAI provider (default, uses gpt-5.4 + Responses API computer tool)
 $env:OPENAI_API_KEY = "sk-your-key"
 
 # Claude provider (alternative)

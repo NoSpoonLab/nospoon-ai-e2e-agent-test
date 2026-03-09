@@ -4,7 +4,7 @@
   "activity": "app.kokorokids.app.CustomMessagingUnityPlayerActivity",
   "pre_steps": [
     { "cmd": "wait", "seconds": 15 },
-    { "cmd": "tap", "x": 1904, "y": 674 }
+    { "cmd": "tap", "x": 720, "y": 450 }
   ],
   "goal": "Reach the game area screen",
   "suggestions": "If asked what type of user you are, always choose 'parent'. If asked whether your child has any special needs, answer 'Yes'. If asked for an email during registration, use kokorokids_test_{timestamp}@kokorokids.app. If you encounter a completely black screen, tap on the screen to make a button appear, do not click in the gameicons",

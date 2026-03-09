@@ -20,12 +20,14 @@ class LLMOutputItem:
     text: Optional[str] = None
     action: Optional[Dict[str, Any]] = None
     success: Optional[bool] = None
+    message: Optional[str] = None
 
 
 @dataclass
 class LLMTurnResult:
     items: List[LLMOutputItem] = field(default_factory=list)
     raw_response: Any = None
+    terminal: bool = False
 
 
 class LLMProvider(ABC):

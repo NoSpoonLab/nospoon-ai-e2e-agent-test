@@ -46,7 +46,7 @@ There is no linter, formatter, or test suite configured. No Makefile exists.
 ### LLM Providers (`source/llm/`)
 
 - **`base.py`** — `LLMProvider` ABC, shared types (`LLMTurnResult`, `LLMOutputItem`), and `create_provider()` factory.
-- **`openai_provider.py`** — OpenAI Responses API with `computer_use_preview` tool. Stateless per turn.
+- **`openai_provider.py`** — OpenAI Responses API with the GA `computer` tool on `gpt-5.4`. Maintains `previous_response_id`/`computer_call_output` state internally.
 - **`claude_provider.py`** — Anthropic Claude with `computer_20251124`/`computer_20250124` tool. Maintains conversation history internally (Claude requires `tool_result` feedback after each `tool_use`).
 
 ### Agent Loop (in `agent_runner.py`)
@@ -65,7 +65,7 @@ JSON files with: `apk`, `package`, `activity`, `goal`, `suggestions`, `negative_
 ### CI/CD Pipeline
 
 1. Unity Cloud Build produces APK → `scripts/ucb_post_build.sh` uploads to S3 and dispatches GitHub event
-2. `.github/workflows/android-agent-dispatch.yml` downloads APK, provisions emulator ("AI Device" 1024x768), runs test, uploads HTML report as artifact
+2. `.github/workflows/android-agent-dispatch.yml` downloads APK, provisions emulator ("AI Device" 1440x900 landscape, tvdpi), runs test, uploads HTML report as artifact
 3. `.github/workflows/android-agent.yml` runs on push/PR with hardcoded APK
 
 Custom AVD config lives in `ci/` (hardware-device.xml, hardware-config.ini).
@@ -80,7 +80,7 @@ Generated in `reports/agent_<timestamp>_<package>/` with: HTML viewer, screensho
 |---|---|---|
 | `LLM_PROVIDER` | Provider selection (`openai`, `claude`) | `openai` |
 | `OPENAI_API_KEY` | Required for OpenAI provider | — |
-| `OPENAI_COMPUTER_MODEL` | OpenAI model name | `computer-use-preview` |
+| `OPENAI_COMPUTER_MODEL` | OpenAI model name | `gpt-5.4` |
 | `ANTHROPIC_API_KEY` | Required for Claude provider | — |
 | `CLAUDE_COMPUTER_MODEL` | Claude model name | `claude-opus-4-6` |
 | `OPENAI_AGENT_MAX_STEPS` | Max agent turns | `250` |

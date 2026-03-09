@@ -8,14 +8,14 @@
       <d:screen>
         <d:screen-size>xlarge</d:screen-size>
         <d:diagonal-length>7.85</d:diagonal-length>
-        <d:pixel-density>mdpi</d:pixel-density>
+        <d:pixel-density>tvdpi</d:pixel-density>
         <d:screen-ratio>notlong</d:screen-ratio>
         <d:dimensions>
-          <d:x-dimension>1024</d:x-dimension>
-          <d:y-dimension>768</d:y-dimension>
+          <d:x-dimension>1440</d:x-dimension>
+          <d:y-dimension>900</d:y-dimension>
         </d:dimensions>
-        <d:xdpi>163.06</d:xdpi>
-        <d:ydpi>163.06</d:ydpi>
+        <d:xdpi>216.47</d:xdpi>
+        <d:ydpi>216.47</d:ydpi>
         <d:touch>
           <d:multitouch>jazz-hands</d:multitouch>
           <d:mechanism>finger</d:mechanism>
@@ -72,15 +72,15 @@ LightSensor</d:sensors>
       <d:gl-extensions/>
       <d:status-bar>false</d:status-bar>
     </d:software>
-    <d:state default="true" name="Portrait">
-      <d:description>The device in portrait orientation</d:description>
-      <d:screen-orientation>port</d:screen-orientation>
+    <d:state default="true" name="Landscape">
+      <d:description>The device in landscape orientation</d:description>
+      <d:screen-orientation>land</d:screen-orientation>
       <d:keyboard-state>keyssoft</d:keyboard-state>
       <d:nav-state>navhidden</d:nav-state>
     </d:state>
-    <d:state name="Landscape">
-      <d:description>The device in landscape orientation</d:description>
-      <d:screen-orientation>land</d:screen-orientation>
+    <d:state name="Portrait">
+      <d:description>The device in portrait orientation</d:description>
+      <d:screen-orientation>port</d:screen-orientation>
       <d:keyboard-state>keyssoft</d:keyboard-state>
       <d:nav-state>navhidden</d:nav-state>
     </d:state>

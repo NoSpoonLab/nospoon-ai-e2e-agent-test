@@ -13,6 +13,29 @@ from typing import Any, Dict, Optional
 from .android_framework import AndroidDevice
 
 
+_KEYEVENT_ALIASES = {
+    "BACK": "4",
+    "BACKSPACE": "67",
+    "DEL": "67",
+    "DELETE": "67",
+    "DPAD_CENTER": "23",
+    "DOWN": "20",
+    "END": "123",
+    "ENTER": "66",
+    "ESC": "111",
+    "ESCAPE": "111",
+    "HOME": "3",
+    "LEFT": "21",
+    "PAGE_DOWN": "93",
+    "PAGE_UP": "92",
+    "RETURN": "66",
+    "RIGHT": "22",
+    "SPACE": "62",
+    "TAB": "61",
+    "UP": "19",
+}
+
+
 def execute_command(device: AndroidDevice, step: Dict[str, Any], package: str = "") -> None:
     """Execute a deterministic test command (tap, swipe, wait, etc.).
 
@@ -49,6 +72,23 @@ def execute_command(device: AndroidDevice, step: Dict[str, Any], package: str = 
         device.stop_app(str(step.get("package", package)))
     else:
         raise ValueError(f"Unknown command: {cmd}")
+
+
+def _normalize_keyevent(raw_key: Any) -> Optional[str]:
+    key = str(raw_key or "").strip().upper()
+    if not key:
+        return None
+    if key.isdigit():
+        return key
+    if key.startswith("KEYCODE_"):
+        return key
+    if key in _KEYEVENT_ALIASES:
+        return _KEYEVENT_ALIASES[key]
+    if len(key) == 1 and "A" <= key <= "Z":
+        return str(29 + (ord(key) - ord("A")))
+    if len(key) == 1 and "0" <= key <= "9":
+        return str(7 + (ord(key) - ord("0")))
+    return None
 
 
 def map_computer_action(device: AndroidDevice, action: Dict[str, Any]) -> Optional[str]:
@@ -105,11 +145,26 @@ def map_computer_action(device: AndroidDevice, action: Dict[str, Any]) -> Option
         text = action.get("text", "")
         device.input_text(str(text))
         return "success"
+    if atype == "keypress":
+        keys = action.get("keys")
+        if not isinstance(keys, list) or not keys:
+            return "error: missing keys"
+        normalized_keys = []
+        for raw_key in keys:
+            normalized = _normalize_keyevent(raw_key)
+            if normalized is None:
+                return f"error: unsupported key {raw_key!r}"
+            normalized_keys.append(normalized)
+        for key in normalized_keys:
+            device.keyevent(key)
+        return "success"
     if atype == "key":
-        key = str(action.get("key") or action.get("code") or "")
+        key = _normalize_keyevent(action.get("key") or action.get("code"))
         if not key:
             return "error: missing key"
         device.keyevent(key)
+        return "success"
+    if atype == "move":
         return "success"
     if atype == "wait":
         seconds = float(action.get("seconds", 1))

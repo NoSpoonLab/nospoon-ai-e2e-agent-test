@@ -1,11 +1,10 @@
 """
-OpenAI Computer Use-driven agent runner for Android emulator via adb.
+Computer-use-driven agent runner for Android emulator via adb.
 
 It installs and launches the target APK, then delegates UI navigation to an
-LLM using the Computer Use tool. The agent requests actions (click/type/scroll
-etc.) and screenshots; this module translates those into adb commands and
-feeds screenshots back to the model until the goal is achieved or steps/time
-exhaust.
+LLM using the OpenAI/Anthropic computer-use toolchain. The model returns UI
+actions, this module translates them into adb commands, and the harness sends
+fresh screenshots back until the goal is achieved or steps/time exhaust.
 
 JSON spec example:
 {
@@ -19,15 +18,14 @@ Environment:
   OPENAI_API_KEY must be set.
 
 Notes:
-- This is a minimal adapter. Computer Use actions are mapped to adb:
-  - mouse_move: ignored (we do not track cursor)
-  - mouse_click: tap(x,y)
+- The harness executes computer-use action batches and returns fresh screenshots.
+- Computer-use actions are mapped to adb:
+  - click: tap(x,y)
   - double_click: tap twice
-  - scroll: swipe
+  - drag/scroll: swipe
   - type: input_text
-  - key: keyevent
+  - keypress/key: keyevent
   - wait: sleep
-  - screenshot: take screenshot and return base64
 """
 
 from __future__ import annotations
@@ -49,6 +47,11 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+try:
+    from PIL import Image
+except Exception:
+    Image = None
+
 from .android_framework import AndroidDevice
 from .actions import map_computer_action, execute_command
 from .app_lifecycle import parse_install_config, prepare_app, teardown_app
@@ -60,14 +63,63 @@ MAX_AGENT_STEPS = int(os.environ.get("AGENT_MAX_STEPS", os.environ.get("OPENAI_A
 WAIT_BETWEEN_ACTIONS = float(os.environ.get("OPENAI_AGENT_WAIT_BETWEEN_ACTIONS", "1.5"))
 
 
-SYSTEM_PROMPT = (
+BASE_SYSTEM_PROMPT = (
     "You control an Android emulator screen. Use the computer tool to progress. "
     "Actions map to Android input: click => tap(x,y), drag/scroll => swipe, type => input text, "
-    "key => hardware key codes (HOME=3, BACK=4, ENTER=66). After each action you will receive a fresh screenshot. "
+    "keypress => hardware key codes (HOME=3, BACK=4, ENTER=66). "
+    "You may issue multiple computer actions in one turn; they will be executed in order and then you will receive a fresh screenshot. "
     "You will receive context that includes 'Goal', optional 'Hints', optional 'Suggestions', "
     "optional 'Negative prompt', and optional 'Success criteria'. Treat 'Suggestions' as strict guidance. "
     "Treat 'Negative prompt' as hard constraints and never perform forbidden actions."
 )
+
+
+def build_system_prompt(provider_name: str) -> str:
+    if provider_name == "openai":
+        return (
+            BASE_SYSTEM_PROMPT + " "
+            "When the task is complete, stop requesting computer actions and answer with "
+            "'PASS: <short reason>'. If the task is blocked or impossible, answer with "
+            "'FAIL: <short reason>'."
+        )
+    return BASE_SYSTEM_PROMPT + " Do not stop with plain text only; finish by calling end_test."
+
+
+def build_completion_rule(provider_name: str) -> str:
+    if provider_name == "openai":
+        return (
+            "Completion rule: Use the computer tool for UI interaction. "
+            "When the Success criteria are satisfied, stop requesting computer actions and answer "
+            "with 'PASS: <short reason>'. If the task is blocked or impossible, answer with "
+            "'FAIL: <short reason>'."
+        )
+    return (
+        "Completion rule: Use the computer tool for UI interaction. "
+        "When the Success criteria are satisfied, call end_test with success=true and a short message. "
+        "If the task is blocked or impossible, call end_test with success=false and explain why. "
+        "Do not finish with plain text only."
+    )
+
+
+def parse_terminal_result(texts: List[str]) -> Tuple[Optional[bool], str]:
+    for text in reversed(texts):
+        normalized = str(text or "").strip()
+        if not normalized:
+            continue
+        upper = normalized.upper()
+        if upper.startswith("PASS:"):
+            return True, normalized.split(":", 1)[1].strip() or normalized
+        if upper == "PASS":
+            return True, normalized
+        if upper.startswith("FAIL:"):
+            return False, normalized.split(":", 1)[1].strip() or normalized
+        if upper == "FAIL":
+            return False, normalized
+    for text in reversed(texts):
+        normalized = str(text or "").strip()
+        if normalized:
+            return None, normalized
+    return None, ""
 
 
 def encode_file_base64(path: Path) -> str:
@@ -75,21 +127,38 @@ def encode_file_base64(path: Path) -> str:
         return base64.b64encode(f.read()).decode("ascii")
 
 
-def take_screenshot_b64(device: AndroidDevice, _out_dir: Path) -> str:
-    """Capture a clean screenshot to a temporary file and return as data URL.
+def _read_image_size(path: Path) -> Tuple[int, int]:
+    if Image is None:
+        return 0, 0
+    try:
+        with Image.open(path) as img:
+            return int(img.width), int(img.height)
+    except Exception:
+        return 0, 0
 
-    Note: Does NOT persist the clean image under reports; it uses a temp file.
-    """
+
+def take_screenshot_payload(device: AndroidDevice, _out_dir: Path) -> Tuple[str, int, int]:
+    """Capture a clean screenshot and return (data_url, width, height)."""
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
         temp_path = Path(tf.name)
     try:
         device.screenshot(temp_path)
+        width, height = _read_image_size(temp_path)
         data_url = "data:image/png;base64," + encode_file_base64(temp_path)
     finally:
         try:
             os.remove(temp_path)
         except Exception:
             pass
+    return data_url, width, height
+
+
+def take_screenshot_b64(device: AndroidDevice, _out_dir: Path) -> str:
+    """Capture a clean screenshot to a temporary file and return as data URL.
+
+    Note: Does NOT persist the clean image under reports; it uses a temp file.
+    """
+    data_url, _, _ = take_screenshot_payload(device, _out_dir)
     return data_url
 
 
@@ -117,7 +186,7 @@ def take_screenshot_b64_marking(
 def get_device_resolution(device: AndroidDevice) -> Tuple[int, int]:
     """Return (width,height) of the device in pixels using `wm size`.
 
-    Fallback to (1080, 2400) on failure.
+    Fallback to (1440, 900) on failure.
     """
     try:
         cmd = ([str(device.tools.adb), "-s", device.serial] if getattr(device, "serial", None) else [str(device.tools.adb)]) + ["shell", "wm", "size"]
@@ -131,7 +200,7 @@ def get_device_resolution(device: AndroidDevice) -> Tuple[int, int]:
                 return int(w_s), int(h_s)
     except Exception:
         pass
-    return 1080, 2400
+    return 1440, 900
 
 
 def get_device_rotation_deg(device: AndroidDevice) -> int:
@@ -289,7 +358,10 @@ def run_agent(test_json_path: Path) -> int:
             logcat_file.close()
             logcat_file = None
 
-    provider = create_provider(os.environ.get("LLM_PROVIDER", "openai"))
+    provider_name = os.environ.get("LLM_PROVIDER", "openai").strip().lower() or "openai"
+    provider = create_provider(provider_name)
+    system_prompt = build_system_prompt(provider_name)
+    completion_rule = build_completion_rule(provider_name)
     # Summary and accumulators
     summary: Dict[str, Any] = {
         "ok": False,
@@ -334,13 +406,17 @@ def run_agent(test_json_path: Path) -> int:
                 summary["negative_prompt"] = negative_prompt_text
 
             # Build persistent context for this sub-step and initial screenshot
-            initial_screenshot = take_screenshot_b64(device, scr_dir)
+            initial_screenshot, current_input_w, current_input_h = take_screenshot_payload(device, scr_dir)
             phy_w, phy_h = get_device_resolution(device)
             rotation = get_device_rotation_deg(device)
             if rotation in (90, 270):
                 dev_w, dev_h = phy_h, phy_w
             else:
                 dev_w, dev_h = phy_w, phy_h
+            display_size = get_device_display_size(device)
+            if current_input_w <= 0 or current_input_h <= 0:
+                current_input_w = display_size[0] if display_size else dev_w
+                current_input_h = display_size[1] if display_size else dev_h
 
             base_user_context = f"Goal: {goal_text}"
             if hints:
@@ -351,11 +427,19 @@ def run_agent(test_json_path: Path) -> int:
                 base_user_context += "\nNegative prompt (DO NOT do): " + negative_prompt_text
             if success_criteria_text:
                 base_user_context += "\nSuccess criteria: " + success_criteria_text
-            base_user_context += "\nInstruction: Only when the Success criteria are satisfied, call the function tool end_test with {success: true}. Otherwise continue working and do not call end_test."
+            base_user_context += (
+                "\n" + completion_rule
+            )
 
             input_messages: List[Dict[str, Any]] = [
-                provider.format_system_message(SYSTEM_PROMPT),
-                provider.format_user_message([base_user_context], initial_screenshot),
+                provider.format_system_message(system_prompt),
+                provider.format_user_message(
+                    [
+                        base_user_context,
+                        f"Current screenshot size: {current_input_w}x{current_input_h}. Use coordinates in this pixel space.",
+                    ],
+                    initial_screenshot,
+                ),
             ]
 
             # Per-substep trackers
@@ -375,13 +459,13 @@ def run_agent(test_json_path: Path) -> int:
                     dev_w, dev_h = phy_h, phy_w
                 else:
                     dev_w, dev_h = phy_w, phy_h
-                log(f"[Agent] Screen: physical={phy_w}x{phy_h}, rotation={rotation}°, canvas={dev_w}x{dev_h}")
+                log(f"[Agent] Screen: physical={phy_w}x{phy_h}, rotation={rotation}Â°, canvas={current_input_w}x{current_input_h}")
 
                 display_size = get_device_display_size(device)
                 turn_result = provider.create_turn(
                     input_messages,
-                    display_width=(display_size[0] if display_size else dev_w),
-                    display_height=(display_size[1] if display_size else dev_h),
+                    display_width=current_input_w or (display_size[0] if display_size else dev_w),
+                    display_height=current_input_h or (display_size[1] if display_size else dev_h),
                 )
 
                 # Persist raw response JSON for this global turn
@@ -402,6 +486,7 @@ def run_agent(test_json_path: Path) -> int:
                 executed_any = False
                 actions_this_turn = 0
                 last_click_xy: Optional[Tuple[int, int]] = None
+                end_test_item: Optional[Any] = None
 
                 for output_item in turn_result.items:
                     if output_item.type == LLMOutputType.REASONING:
@@ -448,56 +533,84 @@ def run_agent(test_json_path: Path) -> int:
                                     })
                                 except Exception:
                                     last_click_xy = None
-                            map_computer_action(device, action if isinstance(action, dict) else {})
+                            action_result = map_computer_action(device, action if isinstance(action, dict) else {})
+                            if action_result != "success":
+                                log(f"[Agent] Action execution result: {action_result}")
+                                continue
                             actions_this_turn += 1
                             executed_any = True
                             device.wait(WAIT_BETWEEN_ACTIONS)
 
                     elif output_item.type == LLMOutputType.END_TEST:
-                        if not output_item.success:
-                            log("[Agent] Ignored end_test call with success=false; continuing without finishing.")
-                            continue
+                        end_test_item = output_item
 
-                        finished = True
-                        explicit_success = True
-                        reason_text = last_reasoning_text or (produced_texts[-1] if produced_texts else "Model invoked end_test")
-                        image_rel: Optional[str] = None
-                        try:
-                            end_path = scr_dir / f"step_{global_turn_index:03d}_end_test.png"
-                            device.screenshot(end_path)
-                            image_rel = f"screenshots/{end_path.name}"
-                        except Exception:
-                            image_rel = None
-                        evt: Dict[str, Any] = {
-                            "index": global_turn_index,
-                            "substep": sub_idx,
-                            "cmd": "end_test",
-                            "success": True,
-                            "reason": reason_text,
-                        }
-                        if image_rel:
-                            evt["image"] = image_rel
-                            evt["physical"] = f"{phy_w}x{phy_h}"
-                            evt["rotation"] = rotation
-                            evt["canvas"] = f"{dev_w}x{dev_h}"
-                        web_events.append(evt)
-                        log("[Agent] end_test tool called. success=True")
-                        break
+                if end_test_item is not None and actions_this_turn > 0:
+                    log("[Agent] Ignoring end_test because the same turn also requested computer actions.")
+                elif end_test_item is not None:
+                    finished = True
+                    explicit_success = bool(end_test_item.success)
+                    reason_text = (
+                        end_test_item.message
+                        or last_reasoning_text
+                        or (produced_texts[-1] if produced_texts else "Model invoked end_test")
+                    )
+                    image_rel: Optional[str] = None
+                    try:
+                        end_path = scr_dir / f"step_{global_turn_index:03d}_end_test.png"
+                        device.screenshot(end_path)
+                        image_rel = f"screenshots/{end_path.name}"
+                    except Exception:
+                        image_rel = None
+                    evt: Dict[str, Any] = {
+                        "index": global_turn_index,
+                        "substep": sub_idx,
+                        "cmd": "end_test",
+                        "success": explicit_success,
+                        "reason": reason_text,
+                    }
+                    if image_rel:
+                        evt["image"] = image_rel
+                        evt["physical"] = f"{phy_w}x{phy_h}"
+                        evt["rotation"] = rotation
+                        evt["canvas"] = f"{current_input_w}x{current_input_h}"
+                    web_events.append(evt)
+                    log(f"[Agent] end_test tool called. success={explicit_success}")
+                elif turn_result.terminal:
+                    finished = True
+                    terminal_success, terminal_message = parse_terminal_result(produced_texts)
+                    explicit_success = terminal_success if terminal_success is not None else False
+                    reason_text = terminal_message or last_reasoning_text or (produced_texts[-1] if produced_texts else "Model stopped without an explicit terminal result")
+                    evt = {
+                        "index": global_turn_index,
+                        "substep": sub_idx,
+                        "cmd": "terminal",
+                        "success": explicit_success,
+                        "reason": reason_text,
+                    }
+                    web_events.append(evt)
+                    if terminal_success is None:
+                        log("[Agent] Model ended the computer-use loop without an explicit PASS/FAIL result.")
+                    else:
+                        log(f"[Agent] Model ended the computer-use loop with terminal success={explicit_success}.")
 
                 if finished:
                     pass_flag = explicit_success if explicit_success is not None else None
                     if pass_flag is not None:
                         log(f"[Agent] Substep {sub_idx} finished. success={pass_flag}")
                 else:
+                    next_screenshot, next_input_w, next_input_h = take_screenshot_payload(device, scr_dir)
+                    if next_input_w > 0 and next_input_h > 0:
+                        current_input_w, current_input_h = next_input_w, next_input_h
                     input_messages = [
                         input_messages[0],
                         provider.format_user_message(
                             [
                                 base_user_context,
+                                f"Current screenshot size: {current_input_w}x{current_input_h}. Use coordinates in this pixel space.",
                                 ("State updated after actions. Continue toward the goal." if executed_any else
                                  "No actions produced. Observe and continue toward the goal."),
                             ],
-                            take_screenshot_b64(device, scr_dir),
+                            next_screenshot,
                         ),
                     ]
                     log(f"[Agent] Substep {sub_idx} turn {turns_this_sub} executed actions: {actions_this_turn}")
